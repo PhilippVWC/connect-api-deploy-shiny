@@ -15,6 +15,10 @@
 # Initialize empty variable that containes the names of the files created at runtime
 set --global files_to_be_cleaned_on_error
 set --global files_to_be_cleaned_on_success
+# Random number as a name for the content item to be deployed.
+# The name field should not collide with other names and is 
+# therefore created randomly.
+set --global content_name (random)
 
 #}}}
 # function definitions {{{
@@ -35,11 +39,11 @@ end
 if ! test \( -n "$argv" \)
 	echo "Please provide a title for the content to be deployed: "
 	echo "##################################################"
-	printf "	Usage: %s <content-title>" (status basename)
+	printf "	Usage: %s <content-title>\n" (status basename)
 	echo "##################################################"
 	exit 1
 else
-	set --global title $argv[1]
+	set --global content_title $argv[1]
 	echo "##################################################"
 	echo "Deploy content $title"
 	echo "##################################################"
@@ -86,27 +90,29 @@ if ! test \( -e "manifest.json" \)
 		Rscript --vanilla -e "rsconnect::writeManifest()" > /dev/null 2>error_msgs_rscript.tmp
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error manifest.json
 		# Did Rscript print out any warnings or errors? If yes, than exit.
-		if test \( (cat error_msgs_rscript.txt | wc -l | string trim) != "0" \)
+		if test \( (cat error_msgs_rscript.tmp | wc -l | string trim) != "0" \)
 			echo "A manifest file could not be created without errors."
 			clean_up $files_to_be_cleaned_on_error
 			echo "Exiting..."
 			exit 1
 		else
 			echo "Manifest file manifest.json created"
-			rm -f error_msgs_rscript.tmp
+			if test \( -e error_msgs_rscript.tmp \) 
+				rm -f error_msgs_rscript.tmp
+			end
 		end
 	end
 end
 
 #}}}
 # Programm {{{
-# Create archive file to be posted to rs connect api endpoint {{{
+# Create archive file {{{
 
 set --local bundle_path "bundle.tar.gz"
-set --local files_to_deploy_all app.R manifest.json R man DESCRIPTION NAMESPACE data .Rbuildignore .Renviron man-roxygen README.md data-raw data inst
+set --local files_to_deploy_all app.R manifest.json R man DESCRIPTION NAMESPACE .Rbuildignore .Renviron man-roxygen README.md data-raw data inst
 set --global files_to_deploy
 set --global files_missing
-echo "Archive directory content to $bundle_path:"
+echo "Zip directory content to $bundle_path:"
 for file in $files_to_deploy_all
 	if test \( -e "$file" \) 
 		set --global files_to_deploy $files_to_deploy $file
@@ -114,8 +120,10 @@ for file in $files_to_deploy_all
 		set --global files_missing $files_missing $file
 	end
 end
-if test \( -n $files_missing \)
-	echo "The files: $files_missing are not contained in the currend working directory and thus not to be deployed."
+if test \( -n "$files_missing" \)
+	echo "The files:"
+	echo "	$files_missing" 
+	echo "are not contained in the currend working directory."
 	echo "Continue? "
 	if test \( (read --prompt-str "y/n: " | string trim) != "y" \)
 		clean_up $files_to_be_cleaned_on_error
@@ -126,6 +134,51 @@ if test \( -n $files_missing \)
 		echo "Archive file created."
 		set --global files_to_be_cleaned_on_success $files_to_be_cleaned_on_success bundle.tar.gz
 	end
+end
+
+#}}}
+# create content at RS Connect {{{
+
+if ! test \( -e .rsc_content_guid \)
+	set --local content_item '{
+	  "access_type": "acl",
+	  "connection_timeout": 3600,
+	  "description": "...",
+	  "idle_timeout": 5,
+	  "init_timeout": 60,
+	  "load_factor": 0.5,
+	  "max_conns_per_process": 20,
+	  "max_processes": 3,
+	  "min_processes": 0,
+	  "name": "TO_BE_REPLACED",
+	  "read_timeout": 3600,
+	  "run_as": "rstudio-connect",
+	  "run_as_current_user": false,
+	  "title": "TO_BE_REPLACED"
+	}'
+	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
+	printf "%s\n" $content_item
+	echo "$CONNECT_SERVER"__api__/v1/content
+	set --local response_to_created_content (\
+		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
+		--header "Authorization: Key $CONNECT_API_KEY" \
+		--data-raw "$content_item" \
+		"$CONNECT_SERVER"__api__/v1/content
+	)
+	if ! test \( $status -eq 0 \) 
+		echo "Content creation failed."
+		clean_up $files_to_be_cleaned_on_error
+		echo "Exiting..."
+		exit 1
+	end
+	# Successfully created content
+	set --global content_guid (echo $response_to_created_content | jq .guid)
+	echo "Successfully created content item with GUID $content_guid."
+	echo "Write to file .rsc_content_guid"
+	echo $content_guid > .rsc_content_guid
+	set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error .rsc_content_guid
+else
+	echo "Reuse existing .rsc_content_guid file."
 end
 
 #}}}
