@@ -9,19 +9,26 @@
 #
 # This script is translated into a fish shell script.
 #
-# DEPENDENCIES: jq, curl
+# DEPENDENCIES:
+# - jq-1.6
+# - curl-7.83.1
+# - Rscript-4.1.2
 # Global variables {{{
 
 # Initialize empty variable that containes the names of the files created at runtime
 set --global files_to_be_cleaned_on_error
 set --global files_to_be_cleaned_on_success
 # Random number as a name for the content item to be deployed.
-# The name field should not collide with other names and is 
-# therefore created randomly.
-set --global content_name (random)
+# The "name" field should not collide with other names for all content deployed by one user 
+# and is therefore created randomly.
+# See https://docs.rstudio.com/connect/cookbook/deploying/#creating-content for details.
+set --global content_name (string join (random) (random))
+set --global api_path "__api__/v1/"
 
 #}}}
 # function definitions {{{
+
+# clean_up {{{
 
 function clean_up
 	echo "Clean up..."
@@ -32,6 +39,33 @@ function clean_up
 		end
 	end
 end
+
+#}}}
+# remove_content_item {{{
+
+function remove_content_item
+	if test \( -n "$argv" \)
+		set --local endpoint_delete_content (string join '' $CONNECT_SERVER $api_path "content/" "$argv")
+		echo "Removing content item $argv"
+		set --local response_to_deleted_content (\
+			curl --silent --insecure --show-error --location --max-redirs 0 --fail --request DELETE \
+				--header "Authorization: Key $CONNECT_API_KEY" \
+				$endpoint_delete_content \
+				)
+		if ! test \( $status -eq 0 \)
+			set --local error_msg (echo $response_to_deleted_content | jq --raw-output '.error')
+			echo "Deletion of content item $argv unsuccessful."
+			echo "Message: "
+			set_color yellow
+			echo "	$error_msg"
+			set_color normal
+		else
+			echo "Deletion of content item $argv successful."
+		end
+	end
+end
+
+#}}}
 
 #}}}
 # Checks in advance {{{
@@ -122,7 +156,9 @@ for file in $files_to_deploy_all
 end
 if test \( -n "$files_missing" \)
 	echo "The files:"
+	set_color yellow
 	echo "	$files_missing" 
+	set_color normal
 	echo "are not contained in the currend working directory."
 	echo "Continue? "
 	if test \( (read --prompt-str "y/n: " | string trim) != "y" \)
@@ -138,32 +174,23 @@ end
 
 #}}}
 # create content at RS Connect {{{
-
+# For api endpoint details see https://docs.rstudio.com/connect/api/#tag--Content-V1-Experimental
+# For workflows suggested by RS Connect see https://docs.rstudio.com/connect/cookbook/deploying/#creating-content
 if ! test \( -e .rsc_content_guid \)
-	set --local content_item '{
-	  "access_type": "acl",
-	  "connection_timeout": 3600,
-	  "description": "...",
-	  "idle_timeout": 5,
-	  "init_timeout": 60,
-	  "load_factor": 0.5,
-	  "max_conns_per_process": 20,
-	  "max_processes": 3,
-	  "min_processes": 0,
-	  "name": "TO_BE_REPLACED",
-	  "read_timeout": 3600,
-	  "run_as": "rstudio-connect",
-	  "run_as_current_user": false,
-	  "title": "TO_BE_REPLACED"
-	}'
+	# Send only required json fields to the server.
+	set --local content_item '{"name": "TO_BE_REPLACED", "title": "TO_BE_REPLACED"}'
+	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
-	printf "%s\n" $content_item
-	echo "$CONNECT_SERVER"__api__/v1/content
+	echo "##################################################"
+	echo "[DEBUG]: Content item to be uploaded: "
+	echo $content_item
+	echo "##################################################"
+	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content")
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
 		--data-raw "$content_item" \
-		"$CONNECT_SERVER"__api__/v1/content
+		$api_endpoint \
 	)
 	if ! test \( $status -eq 0 \) 
 		echo "Content creation failed."
@@ -172,7 +199,12 @@ if ! test \( -e .rsc_content_guid \)
 		exit 1
 	end
 	# Successfully created content
-	set --global content_guid (echo $response_to_created_content | jq .guid)
+	echo "##################################################"
+	echo "[DEBUG]: Response form server:"
+	echo $response_to_created_content | jq '.'
+	echo "##################################################"
+	set --global content_guid (echo $response_to_created_content | jq --raw-output '.guid')
+	set --global content_url (echo $response_to_created_content | jq --raw-output '.url')
 	echo "Successfully created content item with GUID $content_guid."
 	echo "Write to file .rsc_content_guid"
 	echo $content_guid > .rsc_content_guid
@@ -181,6 +213,96 @@ else
 	echo "Reuse existing .rsc_content_guid file."
 end
 
+	clean_up $files_to_be_cleaned_on_error
+	remove_content_item $content_guid
+	echo "Exiting..."
+	exit 1
+#}}}
+# Upload bundle.tar.gz {{{
+# For Details see https://docs.rstudio.com/connect/api/#post-/v1/experimental/content/{guid}/upload
+# The Api endpoint is slightly different here
+# It orientates towards https://github.com/rstudio/connect-api-deploy-shiny
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid" "/upload")
+echo "[DEBUG]: Server URL is $api_endpoint"
+set --local response_to_uploaded_archive (\
+	curl --insecure --silent --show-error --location --max-redirs 0 --fail -request POST \
+	--header "Authorization: Key $CONNECT_API_KEY" \
+	--data-raw $bundle_path \
+	$api_endpoint \
+)
+if ! test \( $status -eq 0 \) 
+	set --local rsconnect_error_msg (echo $response_to_uploaded_archive | jq '.error')
+	echo "##################################################"
+	echo "Uploading bundle.tar.gz failed with error message:"
+	printf "	%s\n" $rsconnect_error_msg
+	echo "##################################################"
+	clean_up $files_to_be_cleaned_on_error
+	remove_content_item $content_guid
+	echo "Exiting..."
+	exit 1
+end
+set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.id')
+echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
+exit
+#}}}
+# Deploy deployment bundle {{{
+# See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
+# Start deployment task {{{
+
+set --local data_deploy '{"bundle_id" : "TO_BE_REPLACED" }'
+set --local data_deploy (echo $data_deploy | jq --arg bid $bundle_id '. | .["bundle_id"]=$bid')
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "__api__/v1/content/" "$content_guid" "/deploy")
+echo "[DEBUG]: Data json to deploy is $data_deploy"
+echo "[DEBUG]: Server api endpoint is $api_endpoint"
+set --global response_to_starting_depl_task (\
+	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
+	--header "Authorization: Key $CONNECT_API_KEY" \
+	--data-raw $data_deploy \
+	$api_endpoint \
+)
+if ! test \( $status -eq 0 \)
+	echo "Starting deployment task failed."
+	clean_up $files_to_be_cleaned_on_error
+	echo "Exiting..."
+	exit 1
+end
+set --global deployment_task_id (echo $response_to_starting_depl_task | jq --raw-output '.task_id')
+echo "Successfully started deployment task $deployment_task_id"
+
+#}}}
+# Poll deployment status until finished {{{
+# For Details see https://docs.rstudio.com/connect/api/#get-/v1/tasks/{id}
+set --global deploy_is_finished "false"
+set --global code -1
+set --global first 0
+while test \( "$deploy_is_finished" = "false" \)
+	# The URL needs to be composed separately, since fish otherwise interprets the "="-sign.
+	set --local task_api_endpoint (string join '' "$CONNECT_SERVER" "__api__/v1/tasks/" "$deployment_task_id" "?wait=1&first=" "$first")
+	set --local deployment_task_status (\
+		curl --insecure --silent --location --max-redirs 0 --fail --request GET \
+		--header "Authorization: Key $CONNECT_API_KEY" \
+		"$task_api_endpoint"
+		)
+	set --global deploy_is_finished (echo $deployment_task_status | jq '.finished')
+	set --global code (echo $deployment_task_status | jq '.code')
+	set --global first (echo $deployment_task_status | jq '.last')
+
+	if ! test \( $code -eq 0 \)
+		 set --local rsconnect_error_msg (echo $deployment_task_status | jq '.error')
+		 echo "##################################################"
+		 echo "[Error]: There was a problem finishing the deployment task."
+		 echo "Response from Server:"
+		 printf "	%s" $rsconnect_error_msg
+		 echo "##################################################"
+		 clean_up $files_to_be_cleaned_on_error
+		 echo "Exiting..."
+		 exit 1
+	end
+end
+echo "Deployment task finished successfully."
+echo "Go to $content_url to see your results"
+
+#}}}
 #}}}
 # Clean up and exit {{{
 
