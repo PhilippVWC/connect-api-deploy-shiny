@@ -224,7 +224,7 @@ set --local response_to_uploaded_archive (\
 	# curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 	curl --insecure --show-error --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
-	--data-raw $bundle_path \
+	--data-binary $bundle_path \
 	$api_endpoint \
 )
 if ! test \( $status -eq 0 \) 
