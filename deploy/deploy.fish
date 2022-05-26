@@ -221,8 +221,7 @@ end
 set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "bundles")
 echo "[DEBUG]: Server URL is $api_endpoint"
 set --local response_to_uploaded_archive (\
-	# curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
-	curl --insecure --show-error --request POST \
+	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
 	--data-binary @"$bundle_path" \
 	$api_endpoint \
@@ -243,9 +242,7 @@ set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.i
 
 echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
 echo "Successfully uploaded bundle.tar.gz with response from server:"
-echo "$response_to_uploaded_archive"
-
-
+echo "$response_to_uploaded_archive" | jq "."
 
 echo "[DEBUG]: "
 	clean_up $files_to_be_cleaned_on_error
