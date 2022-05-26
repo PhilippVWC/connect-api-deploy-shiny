@@ -182,10 +182,10 @@ if ! test \( -e .rsc_content_guid \)
 	set --local content_item '{"name": "TO_BE_REPLACED", "title": "TO_BE_REPLACED"}'
 	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
-	echo "##################################################"
-	echo "[DEBUG]: Content item to be uploaded: "
-	echo $content_item
-	echo "##################################################"
+# 	echo "##################################################"
+# 	echo "[DEBUG]: Content item to be uploaded: "
+# 	echo $content_item
+# 	echo "##################################################"
 	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content")
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
@@ -200,10 +200,10 @@ if ! test \( -e .rsc_content_guid \)
 		exit 1
 	end
 	# Successfully created content
-	echo "##################################################"
-	echo "[DEBUG]: Response form server:"
-	echo $response_to_created_content | jq '.'
-	echo "##################################################"
+# 	echo "##################################################"
+# 	echo "[DEBUG]: Response form server:"
+# 	echo $response_to_created_content | jq '.'
+# 	echo "##################################################"
 	set --global content_guid (echo $response_to_created_content | jq --raw-output '.guid')
 	set --global content_url (echo $response_to_created_content | jq --raw-output '.url')
 	echo "Successfully created content item with GUID $content_guid."
@@ -219,7 +219,7 @@ end
 # The Api endpoint is slightly different here
 # It orientates towards https://github.com/rstudio/connect-api-deploy-shiny
 set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "bundles")
-echo "[DEBUG]: Server URL is $api_endpoint"
+# echo "[DEBUG]: Server URL is $api_endpoint"
 set --local response_to_uploaded_archive (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
@@ -231,7 +231,6 @@ if ! test \( $status -eq 0 \)
 	echo "##################################################"
 	echo "Uploading bundle.tar.gz failed with response from server:"
 	printf "	%s\n" $response_to_uploaded_archive
-	echo $response_to_uploaded_archive
 	echo "##################################################"
 	clean_up $files_to_be_cleaned_on_error
 	remove_content_item $content_guid
@@ -241,33 +240,26 @@ end
 set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.id')
 
 echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
-echo "Successfully uploaded bundle.tar.gz with response from server:"
-echo "$response_to_uploaded_archive" | jq "."
-
-echo "[DEBUG]: "
-	clean_up $files_to_be_cleaned_on_error
-	remove_content_item $content_guid
-	echo "Exiting..."
-	exit 1
 #}}}
 # Deploy deployment bundle {{{
 # See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
 # Start deployment task {{{
 
-set --local data_deploy '{"bundle_id" : "TO_BE_REPLACED" }'
+set --local data_deploy '{"bundle_id":"TO_BE_REPLACED"}'
 set --local data_deploy (echo $data_deploy | jq --arg bid $bundle_id '. | .["bundle_id"]=$bid')
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "__api__/v1/content/" "$content_guid" "/deploy")
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "deploy")
 echo "[DEBUG]: Data json to deploy is $data_deploy"
 echo "[DEBUG]: Server api endpoint is $api_endpoint"
 set --global response_to_starting_depl_task (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
-	--header "Authorization: Key $CONNECT_API_KEY" \
-	--data-raw $data_deploy \
-	$api_endpoint \
+		--header "Authorization: Key $CONNECT_API_KEY" \
+		--data-raw "$data_deploy" \
+		$api_endpoint \
 )
 if ! test \( $status -eq 0 \)
 	echo "Starting deployment task failed."
 	clean_up $files_to_be_cleaned_on_error
+	remove_content_item $content_guid
 	echo "Exiting..."
 	exit 1
 end
@@ -280,6 +272,7 @@ echo "Successfully started deployment task $deployment_task_id"
 set --global deploy_is_finished "false"
 set --global code -1
 set --global first 0
+set --global counter 1
 while test \( "$deploy_is_finished" = "false" \)
 	# The URL needs to be composed separately, since fish otherwise interprets the "="-sign.
 	set --local task_api_endpoint (string join '' "$CONNECT_SERVER" "__api__/v1/tasks/" "$deployment_task_id" "?wait=1&first=" "$first")
@@ -291,21 +284,33 @@ while test \( "$deploy_is_finished" = "false" \)
 	set --global deploy_is_finished (echo $deployment_task_status | jq '.finished')
 	set --global code (echo $deployment_task_status | jq '.code')
 	set --global first (echo $deployment_task_status | jq '.last')
+	echo "##################################################"
+	echo "[DEBUG]: Poll No: $counter"
+	echo "Deployment task $deployment_task_id:"
+	printf "	%s\n" (echo $deployment_task_status | jq '.')
+	echo "##################################################"
+	echo ""
 
 	if ! test \( $code -eq 0 \)
 		 set --local rsconnect_error_msg (echo $deployment_task_status | jq '.error')
 		 echo "##################################################"
 		 echo "[Error]: There was a problem finishing the deployment task."
 		 echo "Response from Server:"
-		 printf "	%s" $rsconnect_error_msg
+		 printf "	%s\n" $rsconnect_error_msg
 		 echo "##################################################"
 		 clean_up $files_to_be_cleaned_on_error
+		 remove_content_item $content_guid
 		 echo "Exiting..."
 		 exit 1
 	end
 end
 echo "Deployment task finished successfully."
-echo "Go to $content_url to see your results"
+		 clean_up $files_to_be_cleaned_on_error
+		 remove_content_item $content_guid
+		 echo "Exiting..."
+		 exit 1
+# echo "Go to $content_url to see the results"
+open -a Firefox $content_url
 
 #}}}
 #}}}
