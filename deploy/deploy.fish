@@ -224,7 +224,7 @@ set --local response_to_uploaded_archive (\
 	# curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 	curl --insecure --show-error --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
-	--data-binary $bundle_path \
+	--data-binary @"$bundle_path" \
 	$api_endpoint \
 )
 if ! test \( $status -eq 0 \) 
@@ -240,7 +240,12 @@ if ! test \( $status -eq 0 \)
 	exit 1
 end
 set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.id')
+
 echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
+echo "Successfully uploaded bundle.tar.gz with response from server:"
+echo "$response_to_uploaded_archive"
+
+
 
 echo "[DEBUG]: "
 	clean_up $files_to_be_cleaned_on_error
