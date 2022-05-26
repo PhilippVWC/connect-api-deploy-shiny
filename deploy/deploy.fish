@@ -12,7 +12,8 @@
 # DEPENDENCIES:
 # - jq-1.6
 # - curl-7.83.1
-# - Rscript-4.1.2
+# - Rscript-4.1.2 and R-package "rsconnect" version >= 0.8.15
+# - tar-3.5.1
 # Global variables {{{
 
 # Initialize empty variable that containes the names of the files created at runtime
@@ -22,7 +23,7 @@ set --global files_to_be_cleaned_on_success
 # The "name" field should not collide with other names for all content deployed by one user 
 # and is therefore created randomly.
 # See https://docs.rstudio.com/connect/cookbook/deploying/#creating-content for details.
-set --global content_name (string join (random) (random))
+set --global content_name (string join '' (random) (random))
 set --global api_path "__api__/v1/"
 
 #}}}
@@ -212,20 +213,16 @@ if ! test \( -e .rsc_content_guid \)
 else
 	echo "Reuse existing .rsc_content_guid file."
 end
-
-	clean_up $files_to_be_cleaned_on_error
-	remove_content_item $content_guid
-	echo "Exiting..."
-	exit 1
 #}}}
 # Upload bundle.tar.gz {{{
 # For Details see https://docs.rstudio.com/connect/api/#post-/v1/experimental/content/{guid}/upload
 # The Api endpoint is slightly different here
 # It orientates towards https://github.com/rstudio/connect-api-deploy-shiny
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid" "/upload")
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "bundles")
 echo "[DEBUG]: Server URL is $api_endpoint"
 set --local response_to_uploaded_archive (\
-	curl --insecure --silent --show-error --location --max-redirs 0 --fail -request POST \
+	# curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
+	curl --insecure --show-error --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
 	--data-raw $bundle_path \
 	$api_endpoint \
@@ -233,8 +230,9 @@ set --local response_to_uploaded_archive (\
 if ! test \( $status -eq 0 \) 
 	set --local rsconnect_error_msg (echo $response_to_uploaded_archive | jq '.error')
 	echo "##################################################"
-	echo "Uploading bundle.tar.gz failed with error message:"
-	printf "	%s\n" $rsconnect_error_msg
+	echo "Uploading bundle.tar.gz failed with response from server:"
+	printf "	%s\n" $response_to_uploaded_archive
+	echo $response_to_uploaded_archive
 	echo "##################################################"
 	clean_up $files_to_be_cleaned_on_error
 	remove_content_item $content_guid
@@ -243,7 +241,12 @@ if ! test \( $status -eq 0 \)
 end
 set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.id')
 echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
-exit
+
+echo "[DEBUG]: "
+	clean_up $files_to_be_cleaned_on_error
+	remove_content_item $content_guid
+	echo "Exiting..."
+	exit 1
 #}}}
 # Deploy deployment bundle {{{
 # See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
