@@ -1,5 +1,5 @@
 #!/usr/bin/env fish
-#
+# Readme {{{
 # Create content in RStudio Connect with a given title. Does not prevent the
 # creation of duplicate titles. Subsequently, create a bundle, upload that
 # bundle to RStudio Connect, deploy that bundle, then wait for deployment to
@@ -8,12 +8,25 @@
 # Run this script from the content root directory.
 #
 # This script is translated into a fish shell script.
-#
-# DEPENDENCIES:
+# }}}
+# DEPENDENCIES {{{
 # - jq-1.6
 # - curl-7.83.1
 # - Rscript-4.1.2 and R-package "rsconnect" version >= 0.8.15
 # - tar-3.5.1
+# }}}
+# Parse Command line options {{{
+
+# v/verbose
+set --local options (fish_opt --short v --long verbose)
+argparse $options -- $argv
+or return
+# make command line options global. Otherwise not usable later
+if test -n "$_flag_verbose"
+	set --global _flag_verbose $_flag_verbose
+end
+
+#}}}
 # Global variables {{{
 
 # Initialize empty variable that containes the names of the files created at runtime
@@ -29,14 +42,23 @@ set --global api_path "__api__/v1/"
 #}}}
 # function definitions {{{
 
+# echo_verbose {{{
+
+function echo_verbose 
+	if test -n "$_flag_verbose"
+		echo $argv
+	end
+end
+
+#}}}
 # clean_up {{{
 
 function clean_up
-	echo "Clean up..."
+	echo_verbose "Clean up..."
 	for file in $argv
 		if test \( -e "$file" \) 
 			rm -f $file
-			echo "File $file removed."
+			echo_verbose "File $file removed."
 		end
 	end
 end
@@ -47,7 +69,7 @@ end
 function remove_content_item
 	if test \( -n "$argv" \)
 		set --local endpoint_delete_content (string join '' $CONNECT_SERVER $api_path "content/" "$argv")
-		echo "Removing content item $argv"
+		echo_verbose "Removing content item $argv"
 		set --local response_to_deleted_content (\
 			curl --silent --insecure --show-error --location --max-redirs 0 --fail --request DELETE \
 				--header "Authorization: Key $CONNECT_API_KEY" \
@@ -55,13 +77,13 @@ function remove_content_item
 				)
 		if ! test \( $status -eq 0 \)
 			set --local error_msg (echo $response_to_deleted_content | jq --raw-output '.error')
-			echo "Deletion of content item $argv unsuccessful."
-			echo "Message: "
+			echo_verbose "Deletion of content item $argv unsuccessful."
+			echo_verbose "Message: "
 			set_color yellow
-			echo "	$error_msg"
+			echo_verbose "	$error_msg"
 			set_color normal
 		else
-			echo "Deletion of content item $argv successful."
+			echo_verbose "Deletion of content item $argv successful."
 		end
 	end
 end
@@ -72,66 +94,66 @@ end
 # Checks in advance {{{
 
 if ! test \( -n "$argv" \)
-	echo "Please provide a title for the content to be deployed: "
-	echo "##################################################"
+	echo_verbose "Please provide a title for the content to be deployed: "
+	echo_verbose "##################################################"
 	printf "	Usage: %s <content-title>\n" (status basename)
-	echo "##################################################"
+	echo_verbose "##################################################"
 	exit 1
 else
 	set --global content_title $argv[1]
-	echo "##################################################"
-	echo "Deploy content $title"
-	echo "##################################################"
+	echo_verbose "##################################################"
+	echo_verbose "Deploy content $title"
+	echo_verbose "##################################################"
 end
 
 # If the CONNECT_SERVER environment variable is not defined
 # exit with a warning
 # Syntax: the escaped paranthesis are optional. See also https://fishshell.com/docs/current/cmds/test.html#cmd-test
 if ! test \( -n "$CONNECT_SERVER" \)
-	echo "The CONNECT_SERVER environment variable is not defined. It defines"
-	echo "the base URL of your RStudio Connect instance."
-	echo 
-	echo "    export CONNECT_SERVER='http://connect.company.com/'"
+	echo_verbose "The CONNECT_SERVER environment variable is not defined. It defines"
+	echo_verbose "the base URL of your RStudio Connect instance."
+	echo_verbose 
+	echo_verbose "    export CONNECT_SERVER='http://connect.company.com/'"
 	exit 1
 end
 
 if ! test \( -n "$CONNECT_API_KEY" \)
-	echo "The CONNECT_API_KEY environment variable is not defined. It must contain"
-	echo "an API key owned by a 'publisher' account in your RStudio Connect instance."
-	echo
-	echo "    export CONNECT_API_KEY='jIsDWwtuWWsRAwu0XoYpbyok2rlXfRWa'"
+	echo_verbose "The CONNECT_API_KEY environment variable is not defined. It must contain"
+	echo_verbose "an API key owned by a 'publisher' account in your RStudio Connect instance."
+	echo_verbose
+	echo_verbose "    export CONNECT_API_KEY='jIsDWwtuWWsRAwu0XoYpbyok2rlXfRWa'"
 	exit 1
 end
 
 if ! test \( -e "app.R" \) 
-	echo "The file app.R does not exist. It serves rsconnect as an entry point to the shiny app."
-	echo "Create it?"
+	echo_verbose "The file app.R does not exist. It serves rsconnect as an entry point to the shiny app."
+	echo_verbose "Create it?"
 	set --local create_app_r_file (string trim (read --prompt-str "y/n?: "))
 	if test \( "$create_app_r_file" = "y" \)
 		printf "# Launch the ShinyApp (Do not remove this comment)\n#To deploy, run: rsconnect::deployApp()\n#Or use the blue button on top of this file\n\npkgload::load_all(export_all = FALSE, helpers = FALSE, attach_testthat = FALSE)\nrun_app()" > app.R
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error app.R
-		echo "File app.R created"
+		echo_verbose "File app.R created"
 	else
-		echo "Exiting..."
+		echo_verbose "Exiting..."
 		exit 1
 	end
 end
 
 if ! test \( -e "manifest.json" \)
-	echo "An RS Connect manifest file does not exist. This file is crucial for RS Connect to deploy the app."
-	echo "Create it?"
+	echo_verbose "An RS Connect manifest file does not exist. This file is crucial for RS Connect to deploy the app."
+	echo_verbose "Create it?"
 	set --local create_manifest_file (read --prompt-str "y/n: " | string trim)
 	if test \( $create_manifest_file = "y" \) 
 		Rscript --vanilla -e "rsconnect::writeManifest()" > /dev/null 2>error_msgs_rscript.tmp
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error manifest.json
 		# Did Rscript print out any warnings or errors? If yes, than exit.
 		if test \( (cat error_msgs_rscript.tmp | wc -l | string trim) != "0" \)
-			echo "A manifest file could not be created without errors."
+			echo_verbose "A manifest file could not be created without errors."
 			clean_up $files_to_be_cleaned_on_error
-			echo "Exiting..."
+			echo_verbose "Exiting..."
 			exit 1
 		else
-			echo "Manifest file manifest.json created"
+			echo_verbose "Manifest file manifest.json created"
 			if test \( -e error_msgs_rscript.tmp \) 
 				rm -f error_msgs_rscript.tmp
 			end
@@ -147,7 +169,7 @@ set --local bundle_path "bundle.tar.gz"
 set --local files_to_deploy_all app.R manifest.json R man DESCRIPTION NAMESPACE .Rbuildignore .Renviron man-roxygen README.md data-raw data inst
 set --global files_to_deploy
 set --global files_missing
-echo "Zip directory content to $bundle_path:"
+echo_verbose "Zip directory content to $bundle_path:"
 for file in $files_to_deploy_all
 	if test \( -e "$file" \) 
 		set --global files_to_deploy $files_to_deploy $file
@@ -156,19 +178,19 @@ for file in $files_to_deploy_all
 	end
 end
 if test \( -n "$files_missing" \)
-	echo "The files:"
+	echo_verbose "The files:"
 	set_color yellow
-	echo "	$files_missing" 
+	echo_verbose "	$files_missing" 
 	set_color normal
-	echo "are not contained in the currend working directory."
-	echo "Continue? "
+	echo_verbose "are not contained in the currend working directory."
+	echo_verbose "Continue? "
 	if test \( (read --prompt-str "y/n: " | string trim) != "y" \)
 		clean_up $files_to_be_cleaned_on_error
-		echo "Exiting..."
+		echo_verbose "Exiting..."
 		exit 1
 	else
 		tar czf $bundle_path $files_to_deploy
-		echo "Archive file created."
+		echo_verbose "Archive file created."
 		set --global files_to_be_cleaned_on_success $files_to_be_cleaned_on_success bundle.tar.gz
 	end
 end
@@ -194,9 +216,9 @@ if ! test \( -e .rsc_content_guid \)
 		$api_endpoint \
 	)
 	if ! test \( $status -eq 0 \) 
-		echo "Content creation failed."
+		echo_verbose "Content creation failed."
 		clean_up $files_to_be_cleaned_on_error
-		echo "Exiting..."
+		echo_verbose "Exiting..."
 		exit 1
 	end
 	# Successfully created content
@@ -206,12 +228,12 @@ if ! test \( -e .rsc_content_guid \)
 # 	echo "##################################################"
 	set --global content_guid (echo $response_to_created_content | jq --raw-output '.guid')
 	set --global content_url (echo $response_to_created_content | jq --raw-output '.url')
-	echo "Successfully created content item with GUID $content_guid."
-	echo "Write to file .rsc_content_guid"
-	echo $content_guid > .rsc_content_guid
+	echo_verbose "Successfully created content item with GUID $content_guid."
+	echo_verbose "Write to file .rsc_content_guid"
+	echo_verbose $content_guid > .rsc_content_guid
 	set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error .rsc_content_guid
 else
-	echo "Reuse existing .rsc_content_guid file."
+	echo_verbose "Reuse existing .rsc_content_guid file."
 end
 #}}}
 # Upload bundle.tar.gz {{{
@@ -228,18 +250,18 @@ set --local response_to_uploaded_archive (\
 )
 if ! test \( $status -eq 0 \) 
 	set --local rsconnect_error_msg (echo $response_to_uploaded_archive | jq '.error')
-	echo "##################################################"
-	echo "Uploading bundle.tar.gz failed with response from server:"
+	echo_verbose "##################################################"
+	echo_verbose "Uploading bundle.tar.gz failed with response from server:"
 	printf "	%s\n" $response_to_uploaded_archive
-	echo "##################################################"
+	echo_verbose "##################################################"
 	clean_up $files_to_be_cleaned_on_error
 	remove_content_item $content_guid
-	echo "Exiting..."
+	echo_verbose "Exiting..."
 	exit 1
 end
 set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.id')
 
-echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
+echo_verbose "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
 #}}}
 # Deploy deployment bundle {{{
 # See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
@@ -248,8 +270,8 @@ echo "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_
 set --local data_deploy '{"bundle_id":"TO_BE_REPLACED"}'
 set --local data_deploy (echo $data_deploy | jq --arg bid $bundle_id '. | .["bundle_id"]=$bid')
 set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "deploy")
-echo "[DEBUG]: Data json to deploy is $data_deploy"
-echo "[DEBUG]: Server api endpoint is $api_endpoint"
+echo_verbose "[DEBUG]: Data json to deploy is $data_deploy"
+echo_verbose "[DEBUG]: Server api endpoint is $api_endpoint"
 set --global response_to_starting_depl_task (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
@@ -257,14 +279,14 @@ set --global response_to_starting_depl_task (\
 		$api_endpoint \
 )
 if ! test \( $status -eq 0 \)
-	echo "Starting deployment task failed."
+	echo_verbose "Starting deployment task failed."
 	clean_up $files_to_be_cleaned_on_error
 	remove_content_item $content_guid
-	echo "Exiting..."
+	echo_verbose "Exiting..."
 	exit 1
 end
 set --global deployment_task_id (echo $response_to_starting_depl_task | jq --raw-output '.task_id')
-echo "Successfully started deployment task $deployment_task_id"
+echo_verbose "Successfully started deployment task $deployment_task_id"
 
 #}}}
 # Poll deployment status until finished {{{
@@ -284,38 +306,34 @@ while test \( "$deploy_is_finished" = "false" \)
 	set --global deploy_is_finished (echo $deployment_task_status | jq '.finished')
 	set --global code (echo $deployment_task_status | jq '.code')
 	set --global first (echo $deployment_task_status | jq '.last')
-	echo "##################################################"
-	echo "[DEBUG]: Poll No: $counter"
-	echo "Deployment task $deployment_task_id:"
+	echo_verbose "##################################################"
+	echo_verbose "[DEBUG]: Poll No: $counter"
+	echo_verbose "Deployment task $deployment_task_id:"
 	printf "	%s\n" (echo $deployment_task_status | jq '.')
-	echo "##################################################"
-	echo ""
+	echo_verbose "##################################################"
+	echo_verbose ""
 
 	if ! test \( $code -eq 0 \)
 		 set --local rsconnect_error_msg (echo $deployment_task_status | jq '.error')
-		 echo "##################################################"
-		 echo "[Error]: There was a problem finishing the deployment task."
-		 echo "Response from Server:"
+		 echo_verbose "##################################################"
+		 echo_verbose "[Error]: There was a problem finishing the deployment task."
+		 echo_verbose "Response from Server:"
 		 printf "	%s\n" $rsconnect_error_msg
-		 echo "##################################################"
+		 echo_verbose "##################################################"
 		 clean_up $files_to_be_cleaned_on_error
 		 remove_content_item $content_guid
-		 echo "Exiting..."
+		 echo_verbose "Exiting..."
 		 exit 1
 	end
 end
-echo "Deployment task finished successfully."
-		 clean_up $files_to_be_cleaned_on_error
-		 remove_content_item $content_guid
-		 echo "Exiting..."
-		 exit 1
-# echo "Go to $content_url to see the results"
+echo_verbose "Deployment task finished successfully."
 open -a Firefox $content_url
 
 #}}}
 #}}}
 # Clean up and exit {{{
 
+echo "cool"
 clean_up $files_to_be_cleaned_on_success
 exit 0
 
