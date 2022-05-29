@@ -9,7 +9,7 @@
 #
 # This script is translated into a fish shell script.
 # }}}
-# DEPENDENCIES {{{
+# dependencies {{{
 # - jq-1.6
 # - curl-7.83.1
 # - Rscript-4.1.2 and R-package "rsconnect" version >= 0.8.15
@@ -24,6 +24,7 @@ or return
 # make command line options global. Otherwise not usable later
 if test -n "$_flag_verbose"
 	set --global _flag_verbose $_flag_verbose
+	set --global _flag_v $_flag_v
 end
 
 #}}}
