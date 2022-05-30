@@ -1,6 +1,6 @@
 #!/usr/bin/env fish
 # Readme {{{
-# Deploy v. 1.0.0
+# Deploy v. 1.0.1
 #
 # Create content in RStudio Connect with a given title. Does not prevent the
 # creation of duplicate titles.
@@ -216,7 +216,7 @@ set --local bundle_path "bundle.tar.gz"
 set --local files_to_deploy_all app.R manifest.json R man DESCRIPTION NAMESPACE .Rbuildignore .Renviron man-roxygen README.md data-raw data inst
 set --global files_to_deploy
 set --global files_missing
-echo_verbose "Zip directory content to $bundle_path:"
+echo_verbose "Zip directory content to \"$bundle_path\":"
 for file in $files_to_deploy_all
 	if test \( -e "$file" \) 
 		set --global files_to_deploy $files_to_deploy $file
@@ -241,10 +241,11 @@ if test \( -n "$files_missing" \)
 		echo_verbose "Exiting..."
 		exit 1
 	end
-	tar czf $bundle_path $files_to_deploy
-	echo_verbose "Archive file created."
-	set --global files_to_be_cleaned_on_success "$files_to_be_cleaned_on_success" "bundle.tar.gz"
 end
+tar czf $bundle_path $files_to_deploy
+echo_verbose "Archive file created."
+set --global files_to_be_cleaned_on_success "$files_to_be_cleaned_on_success" "bundle.tar.gz"
+set --global files_to_be_cleaned_on_error "$files_to_be_cleaned_on_error" "bundle.tar.gz"
 
 #}}}
 # create content at RS Connect {{{
@@ -282,9 +283,28 @@ if ! test \( -e .rsc_content_guid \)
 else
 	echo_verbose "Reuse existing .rsc_content_guid file with content guid: "
 	set --global content_guid (cat .rsc_content_guid | string trim)
+	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid")
 	set_color yellow
 	echo_verbose " $content_guid"
 	set_color normal
+	echo_verbose "Verify that content item exists at"
+	set_color yellow
+	echo_verbose "	$api_endpoint"
+	set_color normal
+	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request GET \
+		--header "Authorization: Key $CONNECT_API_KEY" \
+		"$api_endpoint" &> /dev/null
+	if ! test $status -eq 0
+		set_color red
+		echo "There exists no content at $api_endpoint"
+		echo "Consider deleting the file .rsc_content_guid and try again."
+		set_color normal
+		clean_up $files_to_be_cleaned_on_error
+		echo_verbose "Exiting..."
+		exit 1
+	end
+	set_color normal
+	echo_verbose "Existence of content item $content_guid verified."
 end
 
 #}}}
