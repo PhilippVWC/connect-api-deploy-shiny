@@ -1,5 +1,6 @@
 #!/usr/bin/env fish
 # Readme {{{
+# Deploy v. 1.0.0
 # Create content in RStudio Connect with a given title. Does not prevent the
 # creation of duplicate titles. Subsequently, create a bundle, upload that
 # bundle to RStudio Connect, deploy that bundle, then wait for deployment to
@@ -108,7 +109,9 @@ if ! test \( -n "$argv" \)
 	exit 1
 else
 	echo_verbose "##################################################"
-	echo_verbose "Deploy content $title"
+	set_color brblue
+	echo_verbose "Deploy content $content_title"
+	set_color normal
 	echo_verbose "##################################################"
 end
 
@@ -158,6 +161,8 @@ if ! test \( -e "app.R" \)
 		echo_verbose "Exiting..."
 		exit 1
 	end
+else
+	echo_verbose "Reuse existing file \"app.R\""
 end
 
 #}}}
@@ -175,7 +180,7 @@ if ! test \( -e "manifest.json" \)
 	if test \( $create_manifest_file = "y" \) 
 		Rscript --vanilla -e "rsconnect::writeManifest()" > /dev/null 2>error_msgs_rscript.tmp
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error manifest.json
-		# Did Rscript print out any warnings or errors? If yes, than exit.
+		# Did Rscript print out any warnings or errors? If so, exit.
 		if test \( (cat error_msgs_rscript.tmp | wc -l | string trim) != "0" \)
 			echo_verbose "A manifest file could not be created without errors."
 			clean_up $files_to_be_cleaned_on_error
@@ -188,6 +193,8 @@ if ! test \( -e "manifest.json" \)
 			end
 		end
 	end
+else
+	echo_verbose "Reuse existing file \"manifest.json\""
 end
 
 #}}}
@@ -226,7 +233,7 @@ if test \( -n "$files_missing" \)
 	end
 	tar czf $bundle_path $files_to_deploy
 	echo_verbose "Archive file created."
-	set --global files_to_be_cleaned_on_success $files_to_be_cleaned_on_success bundle.tar.gz
+	set --global files_to_be_cleaned_on_success "$files_to_be_cleaned_on_success" "bundle.tar.gz"
 end
 
 #}}}
@@ -238,10 +245,6 @@ if ! test \( -e .rsc_content_guid \)
 	set --local content_item '{"name": "TO_BE_REPLACED", "title": "TO_BE_REPLACED"}'
 	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
-# 	echo "##################################################"
-# 	echo "[DEBUG]: Content item to be uploaded: "
-# 	echo $content_item
-# 	echo "##################################################"
 	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content")
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
@@ -255,19 +258,18 @@ if ! test \( -e .rsc_content_guid \)
 		echo_verbose "Exiting..."
 		exit 1
 	end
-	# Successfully created content
-# 	echo "##################################################"
-# 	echo "[DEBUG]: Response form server:"
-# 	echo $response_to_created_content | jq '.'
-# 	echo "##################################################"
 	set --global content_guid (echo $response_to_created_content | jq --raw-output '.guid')
-	set --global content_url (echo $response_to_created_content | jq --raw-output '.url')
+	set_color yellow
 	echo_verbose "Successfully created content item with GUID $content_guid."
-	echo_verbose "Write to file .rsc_content_guid"
-	echo_verbose $content_guid > .rsc_content_guid
+	set_color normal
+	echo_verbose "[DEBUG]: Response form server:"
+	echo_verbose "$response_to_created_content" | jq '.'
+	echo_verbose "Persist content guid $content_guid to file .rsc_content_guid"
+	echo $content_guid > .rsc_content_guid
 	set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error .rsc_content_guid
 else
 	echo_verbose "Reuse existing .rsc_content_guid file."
+	set --global content_guid (cat .rsc_content_guid | string trim)
 end
 #}}}
 # Upload bundle.tar.gz {{{
@@ -295,7 +297,10 @@ if ! test \( $status -eq 0 \)
 end
 set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.id')
 
+set_color yellow
 echo_verbose "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
+set_color normal
+
 #}}}
 # Deploy deployment bundle {{{
 # See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
@@ -304,8 +309,8 @@ echo_verbose "Successfully uploaded bundle.tar.gz and created deployment bundle 
 set --local data_deploy '{"bundle_id":"TO_BE_REPLACED"}'
 set --local data_deploy (echo $data_deploy | jq --arg bid $bundle_id '. | .["bundle_id"]=$bid')
 set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "deploy")
-echo_verbose "[DEBUG]: Data json to deploy is $data_deploy"
-echo_verbose "[DEBUG]: Server api endpoint is $api_endpoint"
+echo_verbose "[DEBUG]: data \"json\" to deploy is $data_deploy"
+echo_verbose "[DEBUG]: deployment api endpoint is $api_endpoint"
 set --global response_to_starting_depl_task (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
@@ -320,7 +325,9 @@ if ! test \( $status -eq 0 \)
 	exit 1
 end
 set --global deployment_task_id (echo $response_to_starting_depl_task | jq --raw-output '.task_id')
+set_color yellow
 echo_verbose "Successfully started deployment task $deployment_task_id"
+set_color normal
 
 #}}}
 # Poll deployment status until finished {{{ For Details see https://docs.rstudio.com/connect/api/#get-/v1/tasks/{id}
@@ -339,21 +346,20 @@ while test \( "$deploy_is_finished" = "false" \)
 	set --global deploy_is_finished (echo $deployment_task_status | jq '.finished')
 	set --global code (echo $deployment_task_status | jq '.code')
 	set --global first (echo $deployment_task_status | jq '.last')
-	echo_verbose "##################################################"
+	set_color yellow
 	echo_verbose "[DEBUG]: Poll No: $counter"
+	set_color normal
 	echo_verbose "Deployment task $deployment_task_id:"
-	if test -n "$_flag_verbose"
-		printf "	%s\n" (echo $deployment_task_status | jq '.')
-	end
-	echo_verbose "##################################################"
+	echo_verbose "$deployment_task_status" | jq '.'
 	echo_verbose ""
+	set --global counter (math $counter + 1)
 
 	if ! test \( $code -eq 0 \)
 		 set --local rsconnect_error_msg (echo $deployment_task_status | jq '.error')
 		 echo_verbose "##################################################"
 		 echo_verbose "[Error]: There was a problem finishing the deployment task."
 		 echo_verbose "Response from Server:"
-		 printf "	%s\n" $rsconnect_error_msg
+		 printf "	%s\n" "$rsconnect_error_msg"
 		 echo_verbose "##################################################"
 		 clean_up $files_to_be_cleaned_on_error
 		 remove_content_item $content_guid
@@ -361,7 +367,9 @@ while test \( "$deploy_is_finished" = "false" \)
 		 exit 1
 	end
 end
+set_color yellow
 echo_verbose "Deployment task finished successfully."
+set_color normal
 
 #}}}
 #}}}
