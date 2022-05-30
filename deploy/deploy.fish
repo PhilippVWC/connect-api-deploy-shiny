@@ -1,14 +1,11 @@
 #!/usr/bin/env fish
 # Readme {{{
 # Deploy v. 1.0.0
+#
 # Create content in RStudio Connect with a given title. Does not prevent the
-# creation of duplicate titles. Subsequently, create a bundle, upload that
-# bundle to RStudio Connect, deploy that bundle, then wait for deployment to
-# complete.
-#
+# creation of duplicate titles.
+# 
 # Run this script from the content root directory.
-#
-# This script is translated into a fish shell script.
 # }}}
 # dependencies {{{
 # - jq-1.6
@@ -19,9 +16,11 @@
 # Parse command line options {{{
 
 # v/verbose
-argparse 'v/verbose' 'i/interactive' -- $argv
+argparse 'v/verbose' 'i/interactive' 'h/help' -- $argv
 or return
 # make command line options global. Otherwise not usable later
+# Change variable scope of option flags to global {{{
+
 if test -n "$_flag_interactive"
 	set --global _flag_interactive $_flag_interactive
 	set --global _flag_i $_flag_i
@@ -31,6 +30,13 @@ if test -n "$_flag_verbose"
 	set --global _flag_verbose $_flag_verbose
 	set --global _flag_v $_flag_v
 end
+
+if test -n "$_flag_help"
+	set --global _flag_help $_flag_help
+	set --global _flag_h $_flag_h
+end
+
+#}}}
 
 #}}}
 # Global variables {{{
@@ -44,11 +50,17 @@ set --global content_title $argv[1]
 # and is therefore created randomly.
 # See https://docs.rstudio.com/connect/cookbook/deploying/#creating-content for details.
 set --global content_name (string join '' (random) (random))
-set --global api_path "__api__/v1/"
+set --global api_path "__api__/v1/content"
 
 #}}}
 # function definitions {{{
 
+function show_help
+	echo "##################################################################################"
+	echo -e (string join ' ' "Usage: " "\e[33m" (status basename) "\e[36m[-h/--help] [-i/--interactive] [-v/--verbose]" "\e[32m<content-title>" "\e[0m")
+	# printf "	Usage: %s [-h/--help] [-i/--interactive] [-v/--verbose] <content-title>\n" (status basename)
+	echo "##################################################################################"
+end
 # echo_verbose {{{
 
 function echo_verbose 
@@ -75,12 +87,12 @@ end
 
 function remove_content_item
 	if test \( -n "$argv" \)
-		set --local endpoint_delete_content (string join '' $CONNECT_SERVER $api_path "content/" "$argv")
+		set --local endpoint_delete_content (string join '' "$CONNECT_SERVER" "$api_path/" "$argv")
 		echo_verbose "Removing content item $argv"
 		set --local response_to_deleted_content (\
 			curl --silent --insecure --show-error --location --max-redirs 0 --fail --request DELETE \
 				--header "Authorization: Key $CONNECT_API_KEY" \
-				$endpoint_delete_content \
+				"$endpoint_delete_content" \
 				)
 		if ! test \( $status -eq 0 \)
 			set --local error_msg (echo $response_to_deleted_content | jq --raw-output '.error')
@@ -101,11 +113,9 @@ end
 # Checks in advance {{{
 # check command line arguments {{{
 
-if ! test \( -n "$argv" \)
+if test -z "$argv" -o -n "$_flag_help"
 	echo_verbose "Please provide a title for the content to be deployed: "
-	echo_verbose "##################################################"
-	printf "	Usage: %s <content-title>\n" (status basename)
-	echo_verbose "##################################################"
+	show_help
 	exit 1
 else
 	echo_verbose "##################################################"
@@ -245,12 +255,12 @@ if ! test \( -e .rsc_content_guid \)
 	set --local content_item '{"name": "TO_BE_REPLACED", "title": "TO_BE_REPLACED"}'
 	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
-	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content")
+	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path")
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
 		--data-raw "$content_item" \
-		$api_endpoint \
+		"$api_endpoint" \
 	)
 	if ! test \( $status -eq 0 \) 
 		echo_verbose "Content creation failed."
@@ -276,13 +286,13 @@ end
 # For Details see https://docs.rstudio.com/connect/api/#post-/v1/experimental/content/{guid}/upload
 # The Api endpoint is slightly different here
 # It orientates towards https://github.com/rstudio/connect-api-deploy-shiny
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "bundles")
-# echo "[DEBUG]: Server URL is $api_endpoint"
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid/" "bundles")
+echo_verbose "[DEBUG]: Upload zip archive to $api_endpoint"
 set --local response_to_uploaded_archive (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
 	--data-binary @"$bundle_path" \
-	$api_endpoint \
+	"$api_endpoint" \
 )
 if ! test \( $status -eq 0 \) 
 	set --local rsconnect_error_msg (echo $response_to_uploaded_archive | jq '.error')
@@ -308,14 +318,14 @@ set_color normal
 
 set --local data_deploy '{"bundle_id":"TO_BE_REPLACED"}'
 set --local data_deploy (echo $data_deploy | jq --arg bid $bundle_id '. | .["bundle_id"]=$bid')
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "deploy")
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid/" "deploy")
 echo_verbose "[DEBUG]: data \"json\" to deploy is $data_deploy"
 echo_verbose "[DEBUG]: deployment api endpoint is $api_endpoint"
 set --global response_to_starting_depl_task (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
 		--data-raw "$data_deploy" \
-		$api_endpoint \
+		"$api_endpoint" \
 )
 if ! test \( $status -eq 0 \)
 	echo_verbose "Starting deployment task failed."
@@ -375,7 +385,7 @@ set_color normal
 #}}}
 # Get content details {{{
 
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid")
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid")
 set --local content_details (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request GET \
 		--header "Authorization: Key $CONNECT_API_KEY" \
