@@ -15,13 +15,17 @@
 # - Rscript-4.1.2 and R-package "rsconnect" version >= 0.8.15
 # - tar-3.5.1
 # }}}
-# Parse Command line options {{{
+# Parse command line options {{{
 
 # v/verbose
-set --local options (fish_opt --short v --long verbose)
-argparse $options -- $argv
+argparse 'v/verbose' 'i/interactive' -- $argv
 or return
 # make command line options global. Otherwise not usable later
+if test -n "$_flag_interactive"
+	set --global _flag_interactive $_flag_interactive
+	set --global _flag_i $_flag_i
+end
+
 if test -n "$_flag_verbose"
 	set --global _flag_verbose $_flag_verbose
 	set --global _flag_v $_flag_v
@@ -94,6 +98,7 @@ end
 
 #}}}
 # Checks in advance {{{
+# check command line arguments {{{
 
 if ! test \( -n "$argv" \)
 	echo_verbose "Please provide a title for the content to be deployed: "
@@ -107,6 +112,9 @@ else
 	echo_verbose "##################################################"
 end
 
+#}}}
+# check server environment variable {{{
+
 # If the CONNECT_SERVER environment variable is not defined
 # exit with a warning
 # Syntax: the escaped paranthesis are optional. See also https://fishshell.com/docs/current/cmds/test.html#cmd-test
@@ -118,6 +126,10 @@ if ! test \( -n "$CONNECT_SERVER" \)
 	exit 1
 end
 
+
+#}}}
+# check api key environment variable {{{
+
 if ! test \( -n "$CONNECT_API_KEY" \)
 	echo_verbose "The CONNECT_API_KEY environment variable is not defined. It must contain"
 	echo_verbose "an API key owned by a 'publisher' account in your RStudio Connect instance."
@@ -126,10 +138,18 @@ if ! test \( -n "$CONNECT_API_KEY" \)
 	exit 1
 end
 
+#}}}
+# create app.R {{{
+
 if ! test \( -e "app.R" \) 
-	echo_verbose "The file app.R does not exist. It serves rsconnect as an entry point to the shiny app."
-	echo_verbose "Create it?"
-	set --local create_app_r_file (string trim (read --prompt-str "y/n?: "))
+	if test -n "$_flag_interactive"
+		echo_verbose "The file app.R does not exist. It serves rsconnect as an entry point to the shiny app."
+		echo_verbose "Create it?"
+		set --global create_app_r_file (read --prompt-str "y/n?: " | string trim)
+	else
+		echo_verbose "Create file \"app.R\"..."
+		set --global create_app_r_file "y"
+	end
 	if test \( "$create_app_r_file" = "y" \)
 		printf "# Launch the ShinyApp (Do not remove this comment)\n#To deploy, run: rsconnect::deployApp()\n#Or use the blue button on top of this file\n\npkgload::load_all(export_all = FALSE, helpers = FALSE, attach_testthat = FALSE)\nrun_app()" > app.R
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error app.R
@@ -140,10 +160,18 @@ if ! test \( -e "app.R" \)
 	end
 end
 
+#}}}
+# create manifest.json {{{
+
 if ! test \( -e "manifest.json" \)
-	echo_verbose "An RS Connect manifest file does not exist. This file is crucial for RS Connect to deploy the app."
-	echo_verbose "Create it?"
-	set --local create_manifest_file (read --prompt-str "y/n: " | string trim)
+	if test -n "$_flag_interactive"
+		echo_verbose "An RS Connect manifest file does not exist. This file is crucial for RS Connect to deploy the app."
+		echo_verbose "Create it?"
+		set --global create_manifest_file (read --prompt-str "y/n: " | string trim)
+	else
+		echo_verbose "Create manifest.json..."
+		set --global create_manifest_file "y"
+	end
 	if test \( $create_manifest_file = "y" \) 
 		Rscript --vanilla -e "rsconnect::writeManifest()" > /dev/null 2>error_msgs_rscript.tmp
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error manifest.json
@@ -163,6 +191,7 @@ if ! test \( -e "manifest.json" \)
 end
 
 #}}}
+#}}}
 # Programm {{{
 # Create archive file {{{
 
@@ -179,21 +208,25 @@ for file in $files_to_deploy_all
 	end
 end
 if test \( -n "$files_missing" \)
-	echo_verbose "The files:"
-	set_color yellow
-	echo_verbose "	$files_missing" 
-	set_color normal
-	echo_verbose "are not contained in the currend working directory."
-	echo_verbose "Continue? "
-	if test \( (read --prompt-str "y/n: " | string trim) != "y" \)
+	if test -n "$_flag_interactive"
+		echo_verbose "The files:"
+		set_color yellow
+		echo_verbose "	$files_missing" 
+		set_color normal
+		echo_verbose "are not contained in the currend working directory."
+		echo_verbose "Continue? "
+		set --global create_archive_file (read --prompt-str "y/n: " | string trim)
+	else
+		set --global create_archive_file "y"
+	end
+	if test \( $create_archive_file != "y" \)
 		clean_up $files_to_be_cleaned_on_error
 		echo_verbose "Exiting..."
 		exit 1
-	else
-		tar czf $bundle_path $files_to_deploy
-		echo_verbose "Archive file created."
-		set --global files_to_be_cleaned_on_success $files_to_be_cleaned_on_success bundle.tar.gz
 	end
+	tar czf $bundle_path $files_to_deploy
+	echo_verbose "Archive file created."
+	set --global files_to_be_cleaned_on_success $files_to_be_cleaned_on_success bundle.tar.gz
 end
 
 #}}}
@@ -309,7 +342,9 @@ while test \( "$deploy_is_finished" = "false" \)
 	echo_verbose "##################################################"
 	echo_verbose "[DEBUG]: Poll No: $counter"
 	echo_verbose "Deployment task $deployment_task_id:"
-	printf "	%s\n" (echo $deployment_task_status | jq '.')
+	if test -n "$_flag_verbose"
+		printf "	%s\n" (echo $deployment_task_status | jq '.')
+	end
 	echo_verbose "##################################################"
 	echo_verbose ""
 
@@ -327,7 +362,6 @@ while test \( "$deploy_is_finished" = "false" \)
 	end
 end
 echo_verbose "Deployment task finished successfully."
-open -a Firefox $content_url
 
 #}}}
 #}}}
