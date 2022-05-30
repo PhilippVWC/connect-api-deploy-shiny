@@ -1,6 +1,6 @@
 #!/usr/bin/env fish
 # Readme {{{
-# Deploy v. 1.0.0
+# Deploy v. 1.0.1
 #
 # Create content in RStudio Connect with a given title. Does not prevent the
 # creation of duplicate titles.
@@ -50,7 +50,7 @@ set --global content_title $argv[1]
 # and is therefore created randomly.
 # See https://docs.rstudio.com/connect/cookbook/deploying/#creating-content for details.
 set --global content_name (string join '' (random) (random))
-set --global api_path "__api__/v1/"
+set --global api_path "__api__/v1/content"
 
 #}}}
 # function definitions {{{
@@ -87,12 +87,12 @@ end
 
 function remove_content_item
 	if test \( -n "$argv" \)
-		set --local endpoint_delete_content (string join '' $CONNECT_SERVER $api_path "content/" "$argv")
+		set --local endpoint_delete_content (string join '' "$CONNECT_SERVER" "$api_path/" "$argv")
 		echo_verbose "Removing content item $argv"
 		set --local response_to_deleted_content (\
 			curl --silent --insecure --show-error --location --max-redirs 0 --fail --request DELETE \
 				--header "Authorization: Key $CONNECT_API_KEY" \
-				$endpoint_delete_content \
+				"$endpoint_delete_content" \
 				)
 		if ! test \( $status -eq 0 \)
 			set --local error_msg (echo $response_to_deleted_content | jq --raw-output '.error')
@@ -216,7 +216,7 @@ set --local bundle_path "bundle.tar.gz"
 set --local files_to_deploy_all app.R manifest.json R man DESCRIPTION NAMESPACE .Rbuildignore .Renviron man-roxygen README.md data-raw data inst
 set --global files_to_deploy
 set --global files_missing
-echo_verbose "Zip directory content to $bundle_path:"
+echo_verbose "Zip directory content to \"$bundle_path\":"
 for file in $files_to_deploy_all
 	if test \( -e "$file" \) 
 		set --global files_to_deploy $files_to_deploy $file
@@ -241,10 +241,11 @@ if test \( -n "$files_missing" \)
 		echo_verbose "Exiting..."
 		exit 1
 	end
-	tar czf $bundle_path $files_to_deploy
-	echo_verbose "Archive file created."
-	set --global files_to_be_cleaned_on_success "$files_to_be_cleaned_on_success" "bundle.tar.gz"
 end
+tar czf $bundle_path $files_to_deploy
+echo_verbose "Archive file created."
+set --global files_to_be_cleaned_on_success "$files_to_be_cleaned_on_success" "bundle.tar.gz"
+set --global files_to_be_cleaned_on_error "$files_to_be_cleaned_on_error" "bundle.tar.gz"
 
 #}}}
 # create content at RS Connect {{{
@@ -255,12 +256,14 @@ if ! test \( -e .rsc_content_guid \)
 	set --local content_item '{"name": "TO_BE_REPLACED", "title": "TO_BE_REPLACED"}'
 	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
-	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content")
+	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path")
+	echo "[DEBUG]: Create content at $api_endpoint"
+	echo "[DEBUG]: data $content_item"
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
 		--data-raw "$content_item" \
-		$api_endpoint \
+		"$api_endpoint" \
 	)
 	if ! test \( $status -eq 0 \) 
 		echo_verbose "Content creation failed."
@@ -278,21 +281,44 @@ if ! test \( -e .rsc_content_guid \)
 	echo $content_guid > .rsc_content_guid
 	set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error .rsc_content_guid
 else
-	echo_verbose "Reuse existing .rsc_content_guid file."
+	echo_verbose "Reuse existing .rsc_content_guid file with content guid: "
 	set --global content_guid (cat .rsc_content_guid | string trim)
+	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid")
+	set_color yellow
+	echo_verbose " $content_guid"
+	set_color normal
+	echo_verbose "Verify that content item exists at"
+	set_color yellow
+	echo_verbose "	$api_endpoint"
+	set_color normal
+	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request GET \
+		--header "Authorization: Key $CONNECT_API_KEY" \
+		"$api_endpoint" &> /dev/null
+	if ! test $status -eq 0
+		set_color red
+		echo "There exists no content at $api_endpoint"
+		echo "Consider deleting the file .rsc_content_guid and try again."
+		set_color normal
+		clean_up $files_to_be_cleaned_on_error
+		echo_verbose "Exiting..."
+		exit 1
+	end
+	set_color normal
+	echo_verbose "Existence of content item $content_guid verified."
 end
+
 #}}}
 # Upload bundle.tar.gz {{{
 # For Details see https://docs.rstudio.com/connect/api/#post-/v1/experimental/content/{guid}/upload
 # The Api endpoint is slightly different here
 # It orientates towards https://github.com/rstudio/connect-api-deploy-shiny
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "bundles")
-# echo "[DEBUG]: Server URL is $api_endpoint"
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid/" "bundles")
+echo_verbose "[DEBUG]: Upload zip archive to $api_endpoint"
 set --local response_to_uploaded_archive (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 	--header "Authorization: Key $CONNECT_API_KEY" \
 	--data-binary @"$bundle_path" \
-	$api_endpoint \
+	"$api_endpoint" \
 )
 if ! test \( $status -eq 0 \) 
 	set --local rsconnect_error_msg (echo $response_to_uploaded_archive | jq '.error')
@@ -310,7 +336,6 @@ set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.i
 set_color yellow
 echo_verbose "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
 set_color normal
-
 #}}}
 # Deploy deployment bundle {{{
 # See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
@@ -318,14 +343,14 @@ set_color normal
 
 set --local data_deploy '{"bundle_id":"TO_BE_REPLACED"}'
 set --local data_deploy (echo $data_deploy | jq --arg bid $bundle_id '. | .["bundle_id"]=$bid')
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid/" "deploy")
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid/" "deploy")
 echo_verbose "[DEBUG]: data \"json\" to deploy is $data_deploy"
 echo_verbose "[DEBUG]: deployment api endpoint is $api_endpoint"
 set --global response_to_starting_depl_task (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
 		--data-raw "$data_deploy" \
-		$api_endpoint \
+		"$api_endpoint" \
 )
 if ! test \( $status -eq 0 \)
 	echo_verbose "Starting deployment task failed."
@@ -385,7 +410,7 @@ set_color normal
 #}}}
 # Get content details {{{
 
-set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid")
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path/" "$content_guid")
 set --local content_details (\
 	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request GET \
 		--header "Authorization: Key $CONNECT_API_KEY" \
