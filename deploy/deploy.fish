@@ -256,6 +256,8 @@ if ! test \( -e .rsc_content_guid \)
 	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
 	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path")
+	echo "[DEBUG]: Create content at $api_endpoint"
+	echo "[DEBUG]: data $content_item"
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
@@ -278,9 +280,13 @@ if ! test \( -e .rsc_content_guid \)
 	echo $content_guid > .rsc_content_guid
 	set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error .rsc_content_guid
 else
-	echo_verbose "Reuse existing .rsc_content_guid file."
+	echo_verbose "Reuse existing .rsc_content_guid file with content guid: "
 	set --global content_guid (cat .rsc_content_guid | string trim)
+	set_color yellow
+	echo_verbose " $content_guid"
+	set_color normal
 end
+
 #}}}
 # Upload bundle.tar.gz {{{
 # For Details see https://docs.rstudio.com/connect/api/#post-/v1/experimental/content/{guid}/upload
@@ -310,7 +316,6 @@ set --global bundle_id (echo $response_to_uploaded_archive | jq --raw-output '.i
 set_color yellow
 echo_verbose "Successfully uploaded bundle.tar.gz and created deployment bundle $bundle_id"
 set_color normal
-
 #}}}
 # Deploy deployment bundle {{{
 # See also https://docs.rstudio.com/connect/api/#post-/v1/content/{guid}/deploy
