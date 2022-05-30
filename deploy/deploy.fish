@@ -1,14 +1,11 @@
 #!/usr/bin/env fish
 # Readme {{{
 # Deploy v. 1.0.0
+#
 # Create content in RStudio Connect with a given title. Does not prevent the
-# creation of duplicate titles. Subsequently, create a bundle, upload that
-# bundle to RStudio Connect, deploy that bundle, then wait for deployment to
-# complete.
-#
+# creation of duplicate titles.
+# 
 # Run this script from the content root directory.
-#
-# This script is translated into a fish shell script.
 # }}}
 # dependencies {{{
 # - jq-1.6
@@ -19,9 +16,11 @@
 # Parse command line options {{{
 
 # v/verbose
-argparse 'v/verbose' 'i/interactive' -- $argv
+argparse 'v/verbose' 'i/interactive' 'h/help' -- $argv
 or return
 # make command line options global. Otherwise not usable later
+# Change variable scope of option flags to global {{{
+
 if test -n "$_flag_interactive"
 	set --global _flag_interactive $_flag_interactive
 	set --global _flag_i $_flag_i
@@ -31,6 +30,13 @@ if test -n "$_flag_verbose"
 	set --global _flag_verbose $_flag_verbose
 	set --global _flag_v $_flag_v
 end
+
+if test -n "$_flag_help"
+	set --global _flag_help $_flag_help
+	set --global _flag_h $_flag_h
+end
+
+#}}}
 
 #}}}
 # Global variables {{{
@@ -49,6 +55,12 @@ set --global api_path "__api__/v1/"
 #}}}
 # function definitions {{{
 
+function show_help
+	echo "##################################################################################"
+	echo -e (string join ' ' "Usage: " "\e[33m" (status basename) "\e[36m[-h/--help] [-i/--interactive] [-v/--verbose]" "\e[32m<content-title>" "\e[0m")
+	# printf "	Usage: %s [-h/--help] [-i/--interactive] [-v/--verbose] <content-title>\n" (status basename)
+	echo "##################################################################################"
+end
 # echo_verbose {{{
 
 function echo_verbose 
@@ -101,11 +113,9 @@ end
 # Checks in advance {{{
 # check command line arguments {{{
 
-if ! test \( -n "$argv" \)
+if test -z "$argv" -o -n "$_flag_help"
 	echo_verbose "Please provide a title for the content to be deployed: "
-	echo_verbose "##################################################"
-	printf "	Usage: %s <content-title>\n" (status basename)
-	echo_verbose "##################################################"
+	show_help
 	exit 1
 else
 	echo_verbose "##################################################"
