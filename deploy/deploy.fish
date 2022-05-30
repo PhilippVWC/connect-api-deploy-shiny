@@ -33,6 +33,7 @@ end
 # Initialize empty variable that containes the names of the files created at runtime
 set --global files_to_be_cleaned_on_error
 set --global files_to_be_cleaned_on_success
+set --global content_title $argv[1]
 # Random number as a name for the content item to be deployed.
 # The "name" field should not collide with other names for all content deployed by one user 
 # and is therefore created randomly.
@@ -101,7 +102,6 @@ if ! test \( -n "$argv" \)
 	echo_verbose "##################################################"
 	exit 1
 else
-	set --global content_title $argv[1]
 	echo_verbose "##################################################"
 	echo_verbose "Deploy content $title"
 	echo_verbose "##################################################"
@@ -290,8 +290,7 @@ set --global deployment_task_id (echo $response_to_starting_depl_task | jq --raw
 echo_verbose "Successfully started deployment task $deployment_task_id"
 
 #}}}
-# Poll deployment status until finished {{{
-# For Details see https://docs.rstudio.com/connect/api/#get-/v1/tasks/{id}
+# Poll deployment status until finished {{{ For Details see https://docs.rstudio.com/connect/api/#get-/v1/tasks/{id}
 set --global deploy_is_finished "false"
 set --global code -1
 set --global first 0
@@ -332,9 +331,36 @@ open -a Firefox $content_url
 
 #}}}
 #}}}
+# Get content details {{{
+
+set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path" "content/" "$content_guid")
+set --local content_details (\
+	curl --insecure --silent --show-error --location --max-redirs 0 --fail --request GET \
+		--header "Authorization: Key $CONNECT_API_KEY" \
+		"$api_endpoint"
+)
+echo_verbose "Content Details:"
+echo_verbose "$content_details" | jq '.'
+
+if ! test $status -eq 0
+	echo "Retrieval of content details failed with error message:"
+	echo "##################################################"
+	printf "	%s\n" $content_details
+	echo "##################################################"
+	clean_up $files_to_be_cleaned_on_error
+	remove_content_item $content_guid
+	echo "Exiting..."
+	exit 1
+end
+set --local content_url (echo $content_details | jq '.content_url')
+
+#}}}
 # Clean up and exit {{{
 
-echo "cool"
+echo "URL to $content_title: "
+set_color yellow
+echo "	$content_url"
+set_color normal
 clean_up $files_to_be_cleaned_on_success
 exit 0
 
