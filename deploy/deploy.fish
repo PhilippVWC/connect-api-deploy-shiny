@@ -257,8 +257,8 @@ if ! test \( -e .rsc_content_guid \)
 	# Replace placeholders with jq
 	set --local content_item (echo $content_item | jq --arg title "$content_title" --arg name "$content_name" '. | .["title"]=$title | .["name"]=$name')
 	set --local api_endpoint (string join '' "$CONNECT_SERVER" "$api_path")
-	echo "[DEBUG]: Create content at $api_endpoint"
-	echo "[DEBUG]: data $content_item"
+	echo_verbose "[DEBUG]: Create content at $api_endpoint"
+	echo_verbose "[DEBUG]: data $content_item"
 	set --local response_to_created_content (\
 		curl --insecure --silent --show-error --location --max-redirs 0 --fail --request POST \
 		--header "Authorization: Key $CONNECT_API_KEY" \
@@ -429,16 +429,17 @@ if ! test $status -eq 0
 	echo "Exiting..."
 	exit 1
 end
-set --local content_url (echo $content_details | jq '.content_url')
+set --local content_url (echo $content_details | jq --raw-output '.content_url')
+set --local bundle_id (echo $content_details | jq --raw-output '.bundle_id')
 
 #}}}
 # Clean up and exit {{{
 
-echo "URL to $content_title: "
-set_color yellow
-echo "	$content_url"
-set_color normal
+printf "\e[31mBundle ID\t\t\e[36mGUID\t\t\e[32mURL\e[0m\n"
+printf "\e[31m%s\t\t\e[36m%s\t\t\e[32m%s\e[0m\n" "$bundle_id" "$content_guid" "$content_url"
 clean_up $files_to_be_cleaned_on_success
+
+# open -u $content_url
 exit 0
 
 #}}}
