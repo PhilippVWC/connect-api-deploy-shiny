@@ -16,7 +16,7 @@
 # Parse command line options {{{
 
 # v/verbose
-argparse 'v/verbose' 'i/interactive' 'h/help' -- $argv
+argparse 'v/verbose' 'i/interactive' 'h/help' 'o/open' -- $argv
 or return
 # make command line options global. Otherwise not usable later
 # Change variable scope of option flags to global {{{
@@ -34,6 +34,11 @@ end
 if test -n "$_flag_help"
 	set --global _flag_help $_flag_help
 	set --global _flag_h $_flag_h
+end
+
+if test -n "$_flag_open"
+	set --global _flag_open $_flag_open
+	set --global _flag_o $_flag_o
 end
 
 #}}}
@@ -56,10 +61,10 @@ set --global api_path "__api__/v1/content"
 # function definitions {{{
 
 function show_help
-	echo "##################################################################################"
-	echo -e (string join ' ' "Usage: " "\e[33m" (status basename) "\e[36m[-h/--help] [-i/--interactive] [-v/--verbose]" "\e[32m<content-title>" "\e[0m")
+	echo "###############################################################################################"
+	echo -e (string join ' ' "Usage: " "\e[33m" (status basename) "\e[36m[-h/--help] [-i/--interactive] [-v/--verbose] [-o/--open]" "\e[32m<content-title>" "\e[0m")
 	# printf "	Usage: %s [-h/--help] [-i/--interactive] [-v/--verbose] <content-title>\n" (status basename)
-	echo "##################################################################################"
+	echo "###############################################################################################"
 end
 # echo_verbose {{{
 
@@ -439,7 +444,10 @@ printf "\e[31mBundle ID\t\t\e[36mGUID\t\t\e[32mURL\e[0m\n"
 printf "\e[31m%s\t\t\e[36m%s\t\t\e[32m%s\e[0m\n" "$bundle_id" "$content_guid" "$content_url"
 clean_up $files_to_be_cleaned_on_success
 
-# open -u $content_url
+if test -n "$_flag_open"
+	open -u $content_url
+end
+
 exit 0
 
 #}}}
