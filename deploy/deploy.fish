@@ -204,7 +204,7 @@ if ! test \( -e "app.R" \)
 		set --global create_app_r_file "y"
 	end
 	if test \( "$create_app_r_file" = "y" \)
-		printf "# Launch the ShinyApp (Do not remove this comment)\n#To deploy, run: rsconnect::deployApp()\n#Or use the blue button on top of this file\n\npkgload::load_all(export_all = FALSE, helpers = FALSE, attach_testthat = FALSE)\nrun_app()" > app.R
+		printf "# Launch the ShinyApp (Do not remove this comment)\n#To deploy, run: rsconnect::deployApp()\n#Or use the blue button on top of this file\n\npkgload::load_all(export_all = FALSE, helpers = FALSE, attach_testthat = FALSE)\nrun_app()\n" > app.R
 		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error app.R
 		echo_verbose "File app.R created"
 	else
