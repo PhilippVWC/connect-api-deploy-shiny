@@ -16,7 +16,7 @@
 # Parse command line options {{{
 
 # v/verbose
-argparse 'v/verbose' 'i/interactive' 'h/help' 'o/open' -- $argv
+argparse 'v/verbose' 'i/interactive' 'h/help' 'o/open' 'r/repo=' -- $argv
 or return
 # make command line options global. Otherwise not usable later
 # Change variable scope of option flags to global {{{
@@ -41,6 +41,11 @@ if test -n "$_flag_open"
 	set --global _flag_o $_flag_o
 end
 
+if test -n "$_flag_repo"
+	set --global _flag_repo $_flag_repo
+	set --global _flag_r $_flag_r
+end
+
 #}}}
 
 #}}}
@@ -56,15 +61,26 @@ set --global content_title $argv[1]
 # See https://docs.rstudio.com/connect/cookbook/deploying/#creating-content for details.
 set --global content_name (string join '' (random) (random))
 set --global api_path "__api__/v1/content"
+# Default repository url for packages retrieval from RS Connect server instance.
+# This url needs to be available from RS Connect.
+set --global r_package_repo_default_url "https://cran.r-project.org"
 
 #}}}
 # function definitions {{{
 
 function show_help
-	echo "###############################################################################################"
-	echo -e (string join ' ' "Usage: " "\e[33m" (status basename) "\e[36m[-h/--help] [-i/--interactive] [-v/--verbose] [-o/--open]" "\e[32m<content-title>" "\e[0m")
-	# printf "	Usage: %s [-h/--help] [-i/--interactive] [-v/--verbose] <content-title>\n" (status basename)
-	echo "###############################################################################################"
+	echo "#################################################################"
+	printf (string join ' ' \
+	"Usage: " \
+	"\e[33m" (status basename) "\t" \
+	"\e[36m[-h/--help]\n\t\t\t" \
+	"[-i/--interactive]\n\t\t\t" \
+	"[-v/--verbose]\n\t\t\t" \
+	"[-o/--open]\n\t\t\t" \
+	"[-r/--repo]\e[0m=\e[32m<repository url>\t" \
+	"\e[32m<content title>" "\e[0m\n"
+	)
+	echo "#################################################################"
 end
 # echo_verbose {{{
 
@@ -193,18 +209,28 @@ if ! test \( -e "manifest.json" \)
 		set --global create_manifest_file "y"
 	end
 	if test \( $create_manifest_file = "y" \) 
-		Rscript --vanilla -e "rsconnect::writeManifest()" > /dev/null 2>error_msgs_rscript.tmp
-		set --global files_to_be_cleaned_on_error $files_to_be_cleaned_on_error manifest.json
+		set --global write_manifest_directive "rsconnect::writeManifest(appPrimaryDoc = \"app.R\")" 
+		if test -z "$_flag_repo"
+			set --global write_manifest_directive (string join '' "setOption(repos = \"$r_package_repo_default_url\"); " "$write_manifest_directive")
+		else
+			set --global write_manifest_directive (string join '' "setOption(repos = \"$_flag_repo\"); " "$write_manifest_directive")
+		end
+		echo_verbose "[DEBUG]: Rscript --vanilla -e $write_manifest_directive"
+		Rscript --vanilla -e "$write_manifest_directive" 1> /dev/null 2>.error_msgs_rscript.tmp
+		set --global files_to_be_cleaned_on_error "$files_to_be_cleaned_on_error" "manifest.json" ".error_msgs_rscript.tmp"
 		# Did Rscript print out any warnings or errors? If so, exit.
-		if test \( (cat error_msgs_rscript.tmp | wc -l | string trim) != "0" \)
-			echo_verbose "A manifest file could not be created without errors."
+		if test \( (cat .error_msgs_rscript.tmp | wc -l | string trim) != "0" \)
+			echo_verbose "Manifest file creation failed with errors:"
+			set_color red
+			cat .error_msgs_rscript.tmp
+			set_color normal
 			clean_up $files_to_be_cleaned_on_error
 			echo_verbose "Exiting..."
 			exit 1
 		else
 			echo_verbose "Manifest file manifest.json created"
-			if test \( -e error_msgs_rscript.tmp \) 
-				rm -f error_msgs_rscript.tmp
+			if test \( -e .error_msgs_rscript.tmp \) 
+				rm -f .error_msgs_rscript.tmp
 			end
 		end
 	end
@@ -221,6 +247,7 @@ set --local bundle_path "bundle.tar.gz"
 set --local files_to_deploy_all app.R manifest.json R man DESCRIPTION NAMESPACE .Rbuildignore .Renviron man-roxygen README.md data-raw data inst
 set --global files_to_deploy
 set --global files_missing
+
 echo_verbose "Zip directory content to \"$bundle_path\":"
 for file in $files_to_deploy_all
 	if test \( -e "$file" \) 
