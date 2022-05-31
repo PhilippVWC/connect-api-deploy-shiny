@@ -6,6 +6,22 @@
 # creation of duplicate titles.
 # 
 # Run this script from the content root directory.
+# This script has the following options
+# -v/--verbose:
+# 	More command line output
+# -i/--interactive:
+# 	With this option set, the programm will ask you to create obligatory files
+# 	if not present.
+# -h/--help:
+# 	Print help.
+# -o/--open:
+# 	Open the URL at the end in the browser.
+# -r/--repo:
+# 	Change the repository name of the packages needed in the project.
+# 	Example: script-name --repo="https://cran.rstudio.com" my_content_name
+# -c/--clean:
+# 	Force creation of RS Connect manifest file to be done within an 
+# 	R process with the --vanilla option on.
 # }}}
 # dependencies {{{
 # - jq-1.6
@@ -16,7 +32,7 @@
 # Parse command line options {{{
 
 # v/verbose
-argparse 'v/verbose' 'i/interactive' 'h/help' 'o/open' 'r/repo=' -- $argv
+argparse 'v/verbose' 'i/interactive' 'h/help' 'o/open' 'r/repo=' 'c/clean' -- $argv
 or return
 # make command line options global. Otherwise not usable later
 # Change variable scope of option flags to global {{{
@@ -46,6 +62,11 @@ if test -n "$_flag_repo"
 	set --global _flag_r $_flag_r
 end
 
+if test -n "$_flag_clean"
+	set --global _flag_clean $_flag_clean
+	set --global _flag_c $_flag_c
+end
+
 #}}}
 
 #}}}
@@ -61,9 +82,6 @@ set --global content_title $argv[1]
 # See https://docs.rstudio.com/connect/cookbook/deploying/#creating-content for details.
 set --global content_name (string join '' (random) (random))
 set --global api_path "__api__/v1/content"
-# Default repository url for packages retrieval from RS Connect server instance.
-# This url needs to be available from RS Connect.
-set --global r_package_repo_default_url "https://cran.r-project.org"
 
 #}}}
 # function definitions {{{
@@ -77,6 +95,7 @@ function show_help
 	"[-i/--interactive]\n\t\t\t" \
 	"[-v/--verbose]\n\t\t\t" \
 	"[-o/--open]\n\t\t\t" \
+	"[-c/--clean]\n\t\t\t" \
 	"[-r/--repo]\e[0m=\e[32m<repository url>\t" \
 	"\e[32m<content title>" "\e[0m\n"
 	)
@@ -210,13 +229,17 @@ if ! test \( -e "manifest.json" \)
 	end
 	if test \( $create_manifest_file = "y" \) 
 		set --global write_manifest_directive "rsconnect::writeManifest(appPrimaryDoc = \"app.R\")" 
-		if test -z "$_flag_repo"
-			set --global write_manifest_directive (string join '' "setOption(repos = \"$r_package_repo_default_url\"); " "$write_manifest_directive")
-		else
-			set --global write_manifest_directive (string join '' "setOption(repos = \"$_flag_repo\"); " "$write_manifest_directive")
+		if test -n "$_flag_repo"
+			echo_verbose "[DEBUG]: Use repository url $_flag_repo"
+			set --global write_manifest_directive (string join '' "options(repos = \"$_flag_repo\"); " "$write_manifest_directive")
 		end
-		echo_verbose "[DEBUG]: Rscript --vanilla -e $write_manifest_directive"
-		Rscript --vanilla -e "$write_manifest_directive" 1> /dev/null 2>.error_msgs_rscript.tmp
+		if test -n "$_flag_clean"
+			echo_verbose "[DEBUG]: Rscript --vanilla -e $write_manifest_directive"
+			Rscript --vanilla -e "$write_manifest_directive" 1> /dev/null 2>.error_msgs_rscript.tmp
+		else
+			echo_verbose "[DEBUG]: Rscript --no-save --no-restore -e $write_manifest_directive"
+			Rscript --no-save --no-restore -e "$write_manifest_directive" 1> /dev/null 2>.error_msgs_rscript.tmp
+		end
 		set --global files_to_be_cleaned_on_error "$files_to_be_cleaned_on_error" "manifest.json" ".error_msgs_rscript.tmp"
 		# Did Rscript print out any warnings or errors? If so, exit.
 		if test \( (cat .error_msgs_rscript.tmp | wc -l | string trim) != "0" \)
